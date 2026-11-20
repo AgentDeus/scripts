@@ -52,6 +52,24 @@ jobs:
             || { grep -E "error:|failed" test.log | sort -u | head -150; tail -n 60 test.log; exit 1; }
           grep -E "Test Suite|Executed|\*\* TEST" test.log | tail -n 20
 
+      - name: Build unsigned IPA for sideloading
+        run: |
+          xcodebuild -project iQuasselCC.xcodeproj -scheme iQuasselCC -configuration Release \
+            -sdk iphoneos -destination "generic/platform=iOS" -derivedDataPath ipa-build \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" build > ipa.log 2>&1 \
+            || { grep -E "error:" ipa.log | sort -u | head -100; tail -n 40 ipa.log; exit 1; }
+          rm -rf Payload && mkdir Payload
+          cp -R ipa-build/Build/Products/Release-iphoneos/iQuasselCC.app Payload/
+          zip -qry iQuasselCC-unsigned.ipa Payload
+          ls -lh iQuasselCC-unsigned.ipa
+
+      - name: Upload IPA
+        uses: actions/upload-artifact@v4
+        with:
+          name: iQuasselCC-unsigned-ipa
+          path: iQuasselCC/iQuasselCC-unsigned.ipa
+          retention-days: 90
+
       - name: Upload logs
         if: always()
         uses: actions/upload-artifact@v4
@@ -60,4 +78,5 @@ jobs:
           path: |
             iQuasselCC/build.log
             iQuasselCC/test.log
+            iQuasselCC/ipa.log
           if-no-files-found: ignore
