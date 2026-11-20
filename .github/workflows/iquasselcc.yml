@@ -1,0 +1,63 @@
+name: iQuasselCC iOS build
+
+on:
+  push:
+    paths:
+      - "iQuasselCC/**"
+      - ".github/workflows/iquasselcc.yml"
+  pull_request:
+    paths:
+      - "iQuasselCC/**"
+  workflow_dispatch:
+
+jobs:
+  build-and-test:
+    runs-on: macos-15
+    defaults:
+      run:
+        working-directory: iQuasselCC
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Show Xcode version
+        run: xcodebuild -version
+
+      - name: Pick an iPhone simulator
+        id: sim
+        run: |
+          UDID=$(xcrun simctl list devices available -j | python3 -c '
+          import json, sys
+          d = json.load(sys.stdin)["devices"]
+          for runtime in sorted(d, reverse=True):
+              if "iOS" not in runtime: continue
+              for dev in d[runtime]:
+                  if dev["name"].startswith("iPhone"):
+                      print(dev["udid"]); sys.exit()
+          ')
+          echo "udid=$UDID" >> "$GITHUB_OUTPUT"
+
+      - name: Build app
+        run: |
+          xcodebuild -project iQuasselCC.xcodeproj -scheme iQuasselCC \
+            -destination "id=${{ steps.sim.outputs.udid }}" \
+            CODE_SIGNING_ALLOWED=NO build > build.log 2>&1 \
+            || { grep -E "error:" build.log | sort -u | head -150; tail -n 40 build.log; exit 1; }
+          grep -E "\*\* BUILD" build.log
+
+      - name: Run protocol tests
+        run: |
+          xcodebuild -project iQuasselCC.xcodeproj -scheme iQuasselCC \
+            -destination "id=${{ steps.sim.outputs.udid }}" \
+            CODE_SIGNING_ALLOWED=NO test > test.log 2>&1 \
+            || { grep -E "error:|failed" test.log | sort -u | head -150; tail -n 60 test.log; exit 1; }
+          grep -E "Test Suite|Executed|\*\* TEST" test.log | tail -n 20
+
+      - name: Upload logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: xcodebuild-logs
+          path: |
+            iQuasselCC/build.log
+            iQuasselCC/test.log
+          if-no-files-found: ignore

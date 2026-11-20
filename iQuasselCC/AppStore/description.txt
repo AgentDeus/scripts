@@ -1,0 +1,19 @@
+Name: iQuasselCC
+Subtitle: Quassel Core Client
+
+Quassel Core Client not a stand alone client.
+
+iQuasselCC connects your iPhone to your own Quassel core. The core stays connected to IRC around the clock and keeps your history; iQuasselCC shows your chats and lets you take part from anywhere.
+
+• Connect to several Quassel cores at the same time and switch between them
+• Chat lists, networks, channels and private chats synced from your core
+• Full chat history loaded on demand from the core, with marker line and read state
+• Nick list with modes, away state and whois details
+• mIRC colours and formatting, colourful nicknames, clickable links and channels
+• Tab completion, input history and formatting toolbar
+• Manage networks, identities, chat lists, ignore list, highlight rules and aliases on the core
+• TLS encryption with certificate pinning
+• Light, dark, Material, Solarized and AMOLED themes
+• Notifications for highlights and private messages
+
+Requires a Quassel core (version 0.12 or newer recommended).
