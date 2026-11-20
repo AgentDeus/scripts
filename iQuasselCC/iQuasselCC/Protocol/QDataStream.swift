@@ -246,7 +246,8 @@ struct QDataStreamWriter {
 
     mutating func variantMap(_ m: [String: QVariant]) {
         u32(UInt32(m.count))
-        for (k, v) in m.sorted(by: { $0.key < $1.key }) {
+        // QDataStream writes QMap entries from the last key to the first.
+        for (k, v) in m.sorted(by: { $0.key > $1.key }) {
             qString(k)
             variant(v)
         }
