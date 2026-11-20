@@ -8,7 +8,7 @@ struct NickListView: View {
     var onSelect: (String) -> Void
 
     @State private var filter = ""
-    @State private var settings = AppSettings.shared
+    private var settings: AppSettings { AppSettings.shared }
 
     private struct Entry: Identifiable {
         let nick: String
@@ -22,8 +22,9 @@ struct NickListView: View {
 
     private var entries: [Entry] {
         guard let net = session.networks[buffer.networkId], let chan = net.channel(buffer.name) else { return [] }
-        return chan.userModes.map { nick, modes in
-            let u = net.user(nick)
+        return chan.userModes.map { key, modes in
+            let u = net.users[key]
+            let nick = u?.nick ?? key
             return Entry(nick: nick, modes: modes, prefix: net.prefixes(forModes: modes), rank: net.rank(forModes: modes),
                          away: u?.away ?? false, realName: u?.realName ?? "")
         }
@@ -160,7 +161,7 @@ struct UserInfoView: View {
                                 HStack {
                                     Text(net.channel(c)?.name ?? c)
                                     Spacer()
-                                    let modes = net.channel(c)?.userModes.first(where: { $0.key.lowercased() == nick.lowercased() })?.value ?? ""
+                                    let modes = net.channel(c)?.userModes[nick.lowercased()] ?? ""
                                     Text(net.prefixes(forModes: modes)).foregroundStyle(.secondary)
                                 }
                             }

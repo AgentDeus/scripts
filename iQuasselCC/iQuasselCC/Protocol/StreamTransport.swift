@@ -27,6 +27,7 @@ final class StreamTransport: NSObject, StreamDelegate {
     private var tlsStarting = false
     private var finished = false
     private let readChunk = 64 * 1024
+    private lazy var readBuffer = [UInt8](repeating: 0, count: readChunk)
 
     init(host: String, port: Int) {
         self.host = host
@@ -157,12 +158,11 @@ final class StreamTransport: NSObject, StreamDelegate {
         case .hasBytesAvailable:
             checkTLSEstablished(aStream)
             guard let inp = input else { return }
-            var buffer = [UInt8](repeating: 0, count: readChunk)
             var collected = Data()
             while inp.hasBytesAvailable {
-                let n = inp.read(&buffer, maxLength: readChunk)
+                let n = inp.read(&readBuffer, maxLength: readChunk)
                 if n > 0 {
-                    collected.append(buffer, count: n)
+                    collected.append(readBuffer, count: n)
                 } else if n < 0 {
                     finish(inp.streamError)
                     return

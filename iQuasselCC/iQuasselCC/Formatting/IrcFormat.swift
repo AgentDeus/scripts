@@ -141,13 +141,25 @@ enum IrcFormat {
         return result
     }
 
+    private static var regexCache = [String: NSRegularExpression]()
+    private static let regexLock = NSLock()
+
+    private static func channelRegex(_ types: String) -> NSRegularExpression? {
+        regexLock.lock(); defer { regexLock.unlock() }
+        if let r = regexCache[types] { return r }
+        let r = try? NSRegularExpression(pattern: "(?:^|(?<=[\\s(]))([\(NSRegularExpression.escapedPattern(for: types))][^\\s,\\x07]+[^\\s,.:;!?)\\x07])")
+        regexCache[types] = r
+        return r
+    }
+
     private static let detector = try? NSDataDetector(types: NSTextCheckingResult.CheckingType.link.rawValue)
 
     static func linkify(_ a: inout AttributedString, channelTypes: String) {
         let plain = String(a.characters)
         guard !plain.isEmpty else { return }
         let ns = plain as NSString
-        let matches = detector?.matches(in: plain, range: NSRange(location: 0, length: ns.length)) ?? []
+        let mayHaveLink = plain.contains(".") || plain.contains(":")
+        let matches = mayHaveLink ? (detector?.matches(in: plain, range: NSRange(location: 0, length: ns.length)) ?? []) : []
         var covered = [NSRange]()
         for m in matches {
             guard let url = m.url, let b = bounds(m.range, plain, a) else { continue }
@@ -156,8 +168,8 @@ enum IrcFormat {
             covered.append(m.range)
         }
         // Channel names become tappable "join" links.
-        guard !channelTypes.isEmpty,
-              let re = try? NSRegularExpression(pattern: "(?:^|(?<=[\\s(]))([\(NSRegularExpression.escapedPattern(for: channelTypes))][^\\s,\\x07]+[^\\s,.:;!?)\\x07])") else { return }
+        guard !channelTypes.isEmpty, plain.contains(where: { channelTypes.contains($0) }),
+              let re = channelRegex(channelTypes) else { return }
         for m in re.matches(in: plain, range: NSRange(location: 0, length: ns.length)) {
             let range = m.range(at: 1)
             if covered.contains(where: { NSIntersectionRange($0, range).length > 0 }) { continue }

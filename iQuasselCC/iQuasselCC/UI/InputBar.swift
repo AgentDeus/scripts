@@ -168,7 +168,7 @@ struct InputBar: View {
         let prefix = before.isEmpty ? "" : before + " "
         var candidates: [String] = []
         if let net = net, buffer.type.contains(.channel), let chan = net.channel(buffer.name) {
-            candidates = chan.userModes.keys.sorted { $0.lowercased() < $1.lowercased() }
+            candidates = chan.userModes.keys.sorted().map { net.displayNick($0) }
             candidates += net.channels.values.map { $0.name }
         } else if buffer.type.contains(.query) {
             candidates = [buffer.name, net?.myNick ?? ""]

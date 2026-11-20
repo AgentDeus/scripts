@@ -180,7 +180,7 @@ final class IrcChannel {
     var topic = ""
     var password = ""
     var encrypted = false
-    /// nick (as known) -> mode characters
+    /// lower-cased nick -> mode characters (display nick lives in Network.users)
     var userModes: [String: String] = [:]
     var chanModes: [String: QVariant] = [:]
 
@@ -195,7 +195,7 @@ final class IrcChannel {
         password = m.str("password")
         encrypted = m.bool("encrypted")
         var modes = [String: String]()
-        for (k, v) in m["UserModes"]?.mapValue ?? [:] { modes[k] = v.text }
+        for (k, v) in m["UserModes"]?.mapValue ?? [:] { modes[k.lowercased()] = v.text }
         userModes = modes
         chanModes = m["ChanModes"]?.mapValue ?? [:]
     }
@@ -295,33 +295,34 @@ final class Network: Identifiable {
         return c
     }
 
+    /// Display nick for a lower-cased key from IrcChannel.userModes.
+    func displayNick(_ key: String) -> String { users[key]?.nick ?? key }
+
     func renameUser(from old: String, to new: String) {
-        guard let u = users.removeValue(forKey: old.lowercased()) else { return }
+        let oldKey = old.lowercased(), newKey = new.lowercased()
+        guard let u = users.removeValue(forKey: oldKey) else { return }
         u.nick = new
-        users[new.lowercased()] = u
+        users[newKey] = u
+        // O(1) lookup per channel; only mutate channels that contain the user (mutations notify observers).
         for c in channels.values {
-            if let key = c.userModes.keys.first(where: { $0.lowercased() == old.lowercased() }) {
-                let modes = c.userModes.removeValue(forKey: key)
-                c.userModes[new] = modes ?? ""
-            }
+            guard let modes = c.userModes[oldKey] else { continue }
+            c.userModes.removeValue(forKey: oldKey)
+            c.userModes[newKey] = modes
         }
-        if myNick.lowercased() == old.lowercased() { myNick = new }
+        if myNick.lowercased() == oldKey { myNick = new }
     }
 
     func removeUser(_ nick: String) {
-        users.removeValue(forKey: nick.lowercased())
-        for c in channels.values {
-            if let key = c.userModes.keys.first(where: { $0.lowercased() == nick.lowercased() }) {
-                c.userModes.removeValue(forKey: key)
-            }
+        let key = nick.lowercased()
+        if users[key] != nil { users.removeValue(forKey: key) }
+        for c in channels.values where c.userModes[key] != nil {
+            c.userModes.removeValue(forKey: key)
         }
     }
 
     func partUser(_ nick: String, channel name: String) {
         guard let c = channel(name) else { return }
-        if let key = c.userModes.keys.first(where: { $0.lowercased() == nick.lowercased() }) {
-            c.userModes.removeValue(forKey: key)
-        }
+        if c.userModes[nick.lowercased()] != nil { c.userModes.removeValue(forKey: nick.lowercased()) }
         if let u = user(nick) {
             u.channels.remove(name.lowercased())
             if u.channels.isEmpty && nick.lowercased() != myNick.lowercased() {
@@ -482,8 +483,8 @@ final class Network: Identifiable {
         case "joinChannel":
             u.channels.insert(arg(0).text.lowercased())
             let c = ensureChannel(arg(0).text)
-            if c.userModes.keys.first(where: { $0.lowercased() == u.nick.lowercased() }) == nil {
-                c.userModes[u.nick] = ""
+            if c.userModes[u.nick.lowercased()] == nil {
+                c.userModes[u.nick.lowercased()] = ""
             }
         case "partChannel": partUser(u.nick, channel: arg(0).text)
         case "quit": removeUser(u.nick)
@@ -505,9 +506,7 @@ final class Network: Identifiable {
     func handleChannelSync(name: String, slot: String, _ p: [QVariant]) {
         func arg(_ i: Int) -> QVariant { i < p.count ? p[i] : .invalid }
         let c = ensureChannel(name)
-        func key(for nick: String) -> String {
-            c.userModes.keys.first(where: { $0.lowercased() == nick.lowercased() }) ?? nick
-        }
+        func key(for nick: String) -> String { nick.lowercased() }
         switch slot {
         case "joinIrcUsers":
             let nicks = arg(0).stringListValue

@@ -21,9 +21,11 @@ struct ChatView: View {
     let session: CoreSession
     let buffer: BufferInfo
 
-    @State private var settings = AppSettings.shared
+    private var settings: AppSettings { AppSettings.shared }
     @State private var atBottom = true
     @State private var scrollToBottomToken = 0
+    /// Auto "load more" only fires after the user really scrolled to the top, once per arrival of the loader.
+    @State private var loaderArmed = false
 
     private var store: BufferMessages { session.store(for: buffer.bufferId) }
 
@@ -51,7 +53,7 @@ struct ChatView: View {
                     .onChange(of: store.messages.last?.msgId) { _, _ in
                         if atBottom {
                             withAnimation(.easeOut(duration: 0.15)) { proxy.scrollTo("bottom", anchor: .bottom) }
-                            if scenePhase == .active { session.markRead(buffer.bufferId) }
+                            if scenePhase == .active { session.scheduleMarkRead(buffer.bufferId) }
                         }
                     }
                     .onChange(of: scrollToBottomToken) { _, _ in
@@ -84,10 +86,14 @@ struct ChatView: View {
             session.loadInitialBacklog(buffer.bufferId)
             session.markRead(buffer.bufferId)
             Notifier.shared.clear(account: session.id, buffer: buffer.bufferId)
+            loaderArmed = false
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { loaderArmed = true }
         }
         .onDisappear {
             if session.visibleBuffer == buffer.bufferId { session.visibleBuffer = nil }
             session.setMarkerLine(buffer.bufferId)
+            // Keep chats we are not looking at small, so switching back is fast.
+            session.store(for: buffer.bufferId).shrink(to: AppSettings.shared.initialBacklog)
         }
         .onChange(of: session.isConnected) { _, c in
             if c { session.loadInitialBacklog(buffer.bufferId) }
@@ -103,9 +109,27 @@ struct ChatView: View {
                 .foregroundStyle(theme.secondaryText)
                 .frame(maxWidth: .infinity)
                 .padding(8)
+        } else if store.isFull {
+            Text("Showing the latest \(BufferMessages.maxKept) messages")
+                .font(.caption)
+                .foregroundStyle(theme.secondaryText)
+                .frame(maxWidth: .infinity)
+                .padding(8)
         } else if !store.messages.isEmpty {
-            Color.clear.frame(height: 30)
-                .onAppear { session.loadMoreBacklog(buffer.bufferId) }
+            Button {
+                session.loadMoreBacklog(buffer.bufferId)
+            } label: {
+                Text("Load older messages")
+                    .font(.caption)
+                    .frame(maxWidth: .infinity)
+                    .padding(8)
+            }
+            .onAppear {
+                guard loaderArmed, !atBottom else { return }
+                loaderArmed = false
+                session.loadMoreBacklog(buffer.bufferId)
+            }
+            .onDisappear { loaderArmed = true }
         }
     }
 
@@ -162,7 +186,7 @@ struct MessageRow: View {
     let message: IrcMessage
     let session: CoreSession
     let buffer: BufferInfo
-    @State private var settings = AppSettings.shared
+    private var settings: AppSettings { AppSettings.shared }
 
     private var timeFormat: Date.FormatStyle {
         var f = Date.FormatStyle().hour(settings.use24h ? .twoDigits(amPM: .omitted) : .defaultDigits(amPM: .abbreviated))
@@ -171,8 +195,18 @@ struct MessageRow: View {
         return f
     }
 
+    /// Formatting a message (colours, links) is expensive, so the result is cached per message and style.
+    private var rendered: AttributedString {
+        let s = settings
+        let key = "\(session.id.uuidString)|\(message.msgId)|\(s.theme.rawValue)|\(theme.isDark)|\(s.colorizeNicks.rawValue)|\(s.prefixMode.rawValue)|\(s.nicksInBrackets)|\(s.showFormatting)|\(s.showRealNames)|\(s.showHostmask)" as NSString
+        if let hit = RenderCache.shared.object(forKey: key) { return hit.value }
+        let r = MessageRenderer(theme: theme, settings: s, network: session.networks[message.bufferInfo.networkId])
+            .render(message)
+        RenderCache.shared.setObject(RenderBox(r), forKey: key)
+        return r
+    }
+
     var body: some View {
-        let renderer = MessageRenderer(theme: theme, settings: settings, network: session.networks[message.bufferInfo.networkId])
         let isHighlight = message.flags.contains(.highlight) && !message.flags.contains(.selfMsg)
         HStack(alignment: .firstTextBaseline, spacing: 8) {
             if settings.showTimestamps {
@@ -180,10 +214,9 @@ struct MessageRow: View {
                     .font(.system(size: settings.fontSize * 0.8).monospacedDigit())
                     .foregroundStyle(theme.timestamp)
             }
-            Text(renderer.render(message))
+            Text(rendered)
                 .font(.system(size: settings.fontSize))
                 .foregroundStyle(theme.text)
-                .textSelection(.enabled)
                 .frame(maxWidth: .infinity, alignment: .leading)
         }
         .padding(.horizontal, 10)
@@ -210,4 +243,17 @@ struct MessageRow: View {
             ShareLink(item: MessageRenderer.plainText(message)) { Label("Share", systemImage: "square.and.arrow.up") }
         }
     }
+}
+
+final class RenderBox {
+    let value: AttributedString
+    init(_ v: AttributedString) { value = v }
+}
+
+enum RenderCache {
+    static let shared: NSCache<NSString, RenderBox> = {
+        let c = NSCache<NSString, RenderBox>()
+        c.countLimit = 6000
+        return c
+    }()
 }

@@ -10,6 +10,10 @@ struct DrawerContainer<Content: View, Left: View, Right: View>: View {
     @ViewBuilder var right: () -> Right
 
     @State private var dragOffset: CGFloat = 0
+    /// Drawers are only kept in the view hierarchy while visible, so hidden drawers
+    /// don't re-render on every sync update (big CPU saver on busy networks).
+    @State private var leftMounted = false
+    @State private var rightMounted = false
     @Environment(\.chatTheme) private var theme
 
     var body: some View {
@@ -26,7 +30,7 @@ struct DrawerContainer<Content: View, Left: View, Right: View>: View {
                     .onTapGesture { close() }
 
                 HStack(spacing: 0) {
-                    left()
+                    Group { if leftMounted || leftOpen { left() } else { Color.clear } }
                         .frame(width: width)
                         .background(theme.surface.ignoresSafeArea())
                         .shadow(color: .black.opacity(leftOpen ? 0.3 : 0), radius: 8)
@@ -38,7 +42,7 @@ struct DrawerContainer<Content: View, Left: View, Right: View>: View {
                 if rightEnabled {
                     HStack(spacing: 0) {
                         Spacer(minLength: 0)
-                        right()
+                        Group { if rightMounted || rightOpen { right() } else { Color.clear } }
                             .frame(width: width)
                             .background(theme.surface.ignoresSafeArea())
                             .shadow(color: .black.opacity(rightOpen ? 0.3 : 0), radius: 8)
@@ -50,6 +54,19 @@ struct DrawerContainer<Content: View, Left: View, Right: View>: View {
             .simultaneousGesture(dragGesture(width: width, total: geo.size.width))
             .animation(.easeOut(duration: 0.22), value: leftOpen)
             .animation(.easeOut(duration: 0.22), value: rightOpen)
+            .onChange(of: leftOpen) { _, open in
+                if open { leftMounted = true } else { unmountLater(left: true) }
+            }
+            .onChange(of: rightOpen) { _, open in
+                if open { rightMounted = true } else { unmountLater(left: false) }
+            }
+            .onAppear { leftMounted = leftOpen; rightMounted = rightOpen }
+        }
+    }
+
+    private func unmountLater(left: Bool) {
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
+            if left { if !leftOpen { leftMounted = false } } else { if !rightOpen { rightMounted = false } }
         }
     }
 
@@ -81,8 +98,8 @@ struct DrawerContainer<Content: View, Left: View, Right: View>: View {
                 if leftOpen && dx < 0 { dragOffset = max(dx, -width) }
                 else if rightOpen && dx > 0 { dragOffset = min(dx, width) }
                 else if !leftOpen && !rightOpen {
-                    if v.startLocation.x < 30 && dx > 0 { dragOffset = min(dx, width) }
-                    else if rightEnabled && v.startLocation.x > total - 30 && dx < 0 { dragOffset = max(dx, -width) }
+                    if v.startLocation.x < 30 && dx > 0 { leftMounted = true; dragOffset = min(dx, width) }
+                    else if rightEnabled && v.startLocation.x > total - 30 && dx < 0 { rightMounted = true; dragOffset = max(dx, -width) }
                 }
             }
             .onEnded { v in
@@ -95,6 +112,8 @@ struct DrawerContainer<Content: View, Left: View, Right: View>: View {
                     else if rightEnabled && v.startLocation.x > total - 30 && dx < -threshold { rightOpen = true }
                 }
                 withAnimation(.easeOut(duration: 0.2)) { dragOffset = 0 }
+                if !leftOpen { unmountLater(left: true) }
+                if !rightOpen { unmountLater(left: false) }
             }
     }
 }

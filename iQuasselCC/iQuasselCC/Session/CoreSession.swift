@@ -8,25 +8,43 @@ final class BufferMessages {
     var reachedStart = false
     var initialLoaded = false
 
-    static let maxKept = 3000
+    /// Maximum messages kept in memory per chat. Older history is not loaded beyond this.
+    static let maxKept = 2000
+    /// The oldest message id we already asked the core about (prevents re-requesting the same page).
+    @ObservationIgnored var requestedBefore: MsgId?
+
+    var isFull: Bool { messages.count >= Self.maxKept }
 
     func merge(_ new: [IrcMessage]) {
         guard !new.isEmpty else { return }
-        var byId = [MsgId: IrcMessage]()
+        var byId = [MsgId: IrcMessage](minimumCapacity: messages.count + new.count)
         for m in messages { byId[m.msgId] = m }
         for m in new { byId[m.msgId] = m }
         var sorted = byId.values.sorted { $0.msgId < $1.msgId }
-        if sorted.count > Self.maxKept { sorted.removeFirst(sorted.count - Self.maxKept) }
+        // Trim only from the old end and never below what was just loaded as history,
+        // otherwise "load more" would fetch the same page again forever.
+        if sorted.count > Self.maxKept + 500 { sorted.removeFirst(sorted.count - Self.maxKept - 500) }
         messages = sorted
     }
 
     func append(_ m: IrcMessage) {
         if let last = messages.last, last.msgId >= m.msgId {
-            merge([m])
+            if !messages.contains(where: { $0.msgId == m.msgId }) { merge([m]) }
         } else {
             messages.append(m)
-            if messages.count > Self.maxKept { messages.removeFirst(messages.count - Self.maxKept) }
+            if messages.count > Self.maxKept + 500 {
+                messages.removeFirst(messages.count - Self.maxKept)
+                reachedStart = false
+            }
         }
+    }
+
+    /// Drop old messages of chats that are not on screen to keep memory and diffing cheap.
+    func shrink(to n: Int) {
+        guard messages.count > n else { return }
+        messages.removeFirst(messages.count - n)
+        reachedStart = false
+        requestedBefore = nil
     }
 }
 
@@ -59,7 +77,7 @@ final class CoreSession: Identifiable, CoreConnectionDelegate {
     var passwordChangeResult: Bool?
 
     /// Buffer currently on screen (for read markers and notifications).
-    var visibleBuffer: BufferId?
+    @ObservationIgnored var visibleBuffer: BufferId?
 
     @ObservationIgnored private var link: CoreConnection?
     @ObservationIgnored private var reconnectAttempts = 0
@@ -368,7 +386,7 @@ final class CoreSession: Identifiable, CoreConnectionDelegate {
         }
         handleBufferVisibility(for: m)
         if visibleBuffer == m.bufferInfo.bufferId, AppLifecycle.shared.isActive {
-            markRead(m.bufferInfo.bufferId)
+            scheduleMarkRead(m.bufferInfo.bufferId)
         } else {
             Notifier.shared.notifyIfNeeded(m, session: self)
         }
@@ -442,8 +460,10 @@ final class CoreSession: Identifiable, CoreConnectionDelegate {
 
     func loadMoreBacklog(_ buffer: BufferId) {
         let s = store(for: buffer)
-        guard !s.loading, !s.reachedStart, isConnected else { return }
+        guard !s.loading, !s.reachedStart, !s.isFull, isConnected else { return }
         guard let first = s.messages.first else { loadInitialBacklog(buffer); return }
+        guard s.requestedBefore != first.msgId else { return }
+        s.requestedBefore = first.msgId
         s.loading = true
         let amount = Int32(AppSettings.shared.pageBacklog)
         link?.sync("BacklogManager", "", "requestBacklog",
@@ -479,6 +499,18 @@ final class CoreSession: Identifiable, CoreConnectionDelegate {
     func sendInput(_ buffer: BufferInfo, _ text: String) {
         for line in text.split(separator: "\n", omittingEmptySubsequences: true) {
             link?.rpc("2sendInput(BufferInfo,QString)", [.bufferInfo(buffer), .str(String(line))])
+        }
+    }
+
+    @ObservationIgnored private var pendingRead = Set<BufferId>()
+
+    /// Coalesces read-marker updates so busy channels don't send a sync per incoming line.
+    func scheduleMarkRead(_ buffer: BufferId) {
+        guard !pendingRead.contains(buffer) else { return }
+        pendingRead.insert(buffer)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2) { [weak self] in
+            self?.pendingRead.remove(buffer)
+            self?.markRead(buffer)
         }
     }
 

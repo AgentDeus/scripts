@@ -228,21 +228,38 @@ final class CoreConnection {
                 sendClientInit()
             }
         }
-        while buffer.count >= 4 {
-            let len = buffer.prefix(4).reduce(0) { ($0 << 8) | Int($1) }
-            guard buffer.count >= 4 + len else { return }
-            let payload = buffer.subdata(in: (buffer.startIndex + 4)..<(buffer.startIndex + 4 + len))
-            buffer.removeFirst(4 + len)
+        // Parse all complete frames using an offset, then drop the consumed bytes once
+        // (removing from the front of Data per frame is quadratic on big initial syncs).
+        let bytes = [UInt8](buffer)
+        var offset = 0
+        var batch = [SignalProxyMessage]()
+        while bytes.count - offset >= 4 {
+            let len = Int(bytes[offset]) << 24 | Int(bytes[offset + 1]) << 16 | Int(bytes[offset + 2]) << 8 | Int(bytes[offset + 3])
+            guard bytes.count - offset >= 4 + len else { break }
+            let payload = Data(bytes[(offset + 4)..<(offset + 4 + len)])
+            offset += 4 + len
             var r = QDataStreamReader(payload, features: features)
             do {
                 let list = try r.variantList()
                 if handshakeDone {
-                    if let msg = decode(list) { dispatch(msg) }
+                    guard let msg = decode(list) else { continue }
+                    if case .heartBeat(let v) = msg {
+                        write(encode(.heartBeatReply(v)))
+                    } else {
+                        batch.append(msg)
+                    }
                 } else {
                     handleHandshake(list)
                 }
             } catch {
                 NSLog("iQuasselCC: failed to decode message: \(error)")
+            }
+        }
+        if offset > 0 { buffer = Data(bytes[offset...]) }
+        if !batch.isEmpty {
+            // One main-thread hop per network read instead of one per message.
+            DispatchQueue.main.async {
+                for m in batch { self.delegate?.connection(self, received: m) }
             }
         }
     }
@@ -368,14 +385,6 @@ final class CoreConnection {
     }
 
     // MARK: SignalProxy
-
-    private func dispatch(_ msg: SignalProxyMessage) {
-        if case .heartBeat(let v) = msg {
-            write(encode(.heartBeatReply(v)))
-            return
-        }
-        DispatchQueue.main.async { self.delegate?.connection(self, received: msg) }
-    }
 
     private func decode(_ list: [QVariant]) -> SignalProxyMessage? {
         guard let first = list.first, let type = first.int64Value else { return nil }
