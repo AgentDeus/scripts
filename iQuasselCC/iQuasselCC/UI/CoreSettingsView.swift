@@ -569,10 +569,8 @@ struct IgnoreListView: View {
                 Button { editing = e } label: {
                     HStack {
                         VStack(alignment: .leading) {
-                            Text(e.rule).foregroundStyle(e.isActive ? .primary : .secondary)
-                            Text(["Sender", "Message", "CTCP"][min(max(e.type, 0), 2)] + " · " +
-                                 (e.strictness == 2 ? "Permanent" : "Dynamic") + " · " +
-                                 ["Global", "Network", "Channel"][min(max(e.scope, 0), 2)])
+                            Text(e.rule).foregroundStyle(e.isActive ? Color.primary : Color.secondary)
+                            Text(summary(e))
                                 .font(.caption).foregroundStyle(.secondary)
                         }
                         Spacer()
@@ -602,6 +600,17 @@ struct IgnoreListView: View {
                 }
             }
         }
+    }
+}
+
+extension IgnoreListView {
+    func summary(_ e: IgnoreEntry) -> String {
+        let types = ["Sender", "Message", "CTCP"]
+        let scopes = ["Global", "Network", "Channel"]
+        let type: String = types[min(max(e.type, 0), 2)]
+        let strict: String = e.strictness == 2 ? "Permanent" : "Dynamic"
+        let scope: String = scopes[min(max(e.scope, 0), 2)]
+        return "\(type) · \(strict) · \(scope)"
     }
 }
 
@@ -665,7 +674,7 @@ struct HighlightRulesView: View {
                 ForEach(items) { r in
                     Button { editing = r } label: {
                         VStack(alignment: .leading) {
-                            Text(r.name).foregroundStyle(r.isEnabled ? .primary : .secondary)
+                            Text(r.name).foregroundStyle(r.isEnabled ? Color.primary : Color.secondary)
                             if !r.channel.isEmpty || !r.sender.isEmpty {
                                 Text([r.sender, r.channel].filter { !$0.isEmpty }.joined(separator: " · "))
                                     .font(.caption).foregroundStyle(.secondary)
