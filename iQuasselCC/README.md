@@ -2,7 +2,7 @@
 
 **Quassel Core Client not a stand alone client.**
 
-iQuasselCC is an iPhone (and iPad) client for [Quassel](https://quassel-irc.org) cores. Its layout and behaviour follow the
+iQuasselCC is an iPhone-only client for [Quassel](https://quassel-irc.org) cores. Its layout and behaviour follow the
 Android client: an app bar with the chat name and topic, the chat list in a left drawer, the nick list in a right drawer,
 and the chat with an input line at the bottom. It does not connect to IRC itself. It connects to your Quassel core,
 which stays on IRC for you and keeps your history.
@@ -30,7 +30,7 @@ backlog fills any gap. Notifications cannot be delivered while the app is suspen
 
 ## Building
 
-Requirements: Xcode 15 or newer, iOS 17 or newer.
+Requirements: an iPhone with iOS 17 or newer. The app is iPhone-only: no iPad, no Mac. Apple only allows iOS apps to be compiled with Xcode, so building and installing it onto the iPhone needs a Mac with Xcode 15+ (or the included GitHub Actions workflow, which compiles on a hosted macOS machine and tests in an iPhone simulator).
 
 1. Open `iQuasselCC/iQuasselCC.xcodeproj` in Xcode.
 2. Pick your development team under *Signing & Capabilities*. Change the bundle identifier `app.iquasselcc.client` if you need to.
