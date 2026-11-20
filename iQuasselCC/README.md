@@ -28,6 +28,23 @@ iOS suspends network sockets shortly after an app goes to the background. iQuass
 reconnects as soon as it comes back to the foreground. Your Quassel core stays connected to IRC the whole time, and the
 backlog fills any gap. Notifications cannot be delivered while the app is suspended, because Quassel has no push service.
 
+## Installing without a Mac (Windows or Linux)
+
+You don't need a Mac. GitHub's macOS build machine compiles the app on every push and publishes an **unsigned IPA**:
+
+1. Open the latest *iQuasselCC iOS build* run under the repository's **Actions** tab and download the
+   `iQuasselCC-unsigned-ipa` artifact (a zip containing `iQuasselCC-unsigned.ipa`).
+2. Sign and install it with your Apple ID:
+   - **Windows:** [Sideloadly](https://sideloadly.io) (or AltStore's AltServer). Install iTunes and iCloud from apple.com
+     first (not the Microsoft Store versions), connect the iPhone by USB, drag in the IPA, enter your Apple ID and press Start.
+   - **Linux:** [AltServer-Linux](https://github.com/NyaMisty/alt-server) or [SideStore](https://sidestore.io)
+     (SideStore can refresh the app on the phone itself, without a computer).
+3. On the iPhone, turn on *Settings → Privacy & Security → Developer Mode*, and trust your Apple ID under
+   *Settings → General → VPN & Device Management*.
+
+With a free Apple ID the signature lasts **7 days**. Re-sign the app with the same tool, or let SideStore/AltStore
+refresh it. Your accounts and settings are kept. A paid Apple Developer account ($99/year) gives 1-year signing and TestFlight.
+
 ## Building
 
 Requirements: an iPhone with iOS 17 or newer. The app is iPhone-only: no iPad, no Mac. Apple only allows iOS apps to be compiled with Xcode, so building and installing it onto the iPhone needs a Mac with Xcode 15+ (or the included GitHub Actions workflow, which compiles on a hosted macOS machine and tests in an iPhone simulator).
