@@ -317,7 +317,6 @@ struct BufferListView: View {
     private func activityColor(_ b: BufferInfo) -> Color? {
         if (session.bufferSyncer.highlightCounts[b.bufferId] ?? 0) > 0 { return theme.activityHighlight }
         let a = session.activity(b.bufferId)
-        if a.contains(.highlight) { return theme.activityHighlight }
         if !a.intersection(.conversation).isEmpty { return theme.activityMessage }
         if !a.isEmpty { return theme.activityOther }
         return nil

@@ -230,8 +230,9 @@ final class Identity: Identifiable {
     var settings: IdentitySettings
 
     init(map: [String: QVariant]) {
-        settings = IdentitySettings(map: map)
-        id = settings.identityId
+        let s = IdentitySettings(map: map)
+        id = s.identityId
+        settings = s
     }
 
     func handleSync(_ slot: String, _ p: [QVariant]) {
