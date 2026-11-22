@@ -73,7 +73,7 @@ final class AppSettings {
     var connectAllOnLaunch: Bool { didSet { d.set(connectAllOnLaunch, forKey: "connectAllOnLaunch") } }
     var showInputFormattingBar: Bool { didSet { d.set(showInputFormattingBar, forKey: "showInputFormattingBar") } }
     var showNickListButton: Bool { didSet { d.set(showNickListButton, forKey: "showNickListButton") } }
-    var sendOnReturn: Bool { didSet { d.set(sendOnReturn, forKey: "sendOnReturn") } }
+    var sendOnReturn: Bool { didSet { d.set(sendOnReturn, forKey: "sendOnReturnV2") } }
     var hideInactiveBuffersLocally: Bool { didSet { d.set(hideInactiveBuffersLocally, forKey: "hideInactiveBuffers") } }
     var inputHistorySize: Int { didSet { d.set(inputHistorySize, forKey: "inputHistorySize") } }
 
@@ -106,7 +106,8 @@ final class AppSettings {
         connectAllOnLaunch = b("connectAllOnLaunch", true)
         showInputFormattingBar = b("showInputFormattingBar", false)
         showNickListButton = b("showNickListButton", true)
-        sendOnReturn = b("sendOnReturn", true)
+        // Default: the keyboard return key inserts a new line, the send button sends.
+        sendOnReturn = b("sendOnReturnV2", false)
         hideInactiveBuffersLocally = b("hideInactiveBuffers", false)
         inputHistorySize = i("inputHistorySize", 50)
     }

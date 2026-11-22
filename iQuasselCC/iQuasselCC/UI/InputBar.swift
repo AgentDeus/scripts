@@ -41,8 +41,10 @@ struct InputBar: View {
                 set: { new in
                     let old = drafts.drafts[buffer.bufferId] ?? ""
                     completion = nil
-                    if settings.sendOnReturn, new.hasSuffix("\n"), new.count == old.count + 1 {
-                        drafts.drafts[buffer.bufferId] = String(new.dropLast())
+                    if settings.sendOnReturn, new.count == old.count + 1,
+                       new.filter({ $0 == "\n" }).count == old.filter({ $0 == "\n" }).count + 1 {
+                        // Return was pressed (anywhere in the text): send what was typed.
+                        drafts.drafts[buffer.bufferId] = old
                         send()
                     } else {
                         drafts.drafts[buffer.bufferId] = new
@@ -68,7 +70,7 @@ struct InputBar: View {
                 TextField(placeholder, text: text, axis: .vertical)
                     .lineLimit(1...6)
                     .focused($focused)
-                    .submitLabel(.send)
+                    .submitLabel(settings.sendOnReturn ? .send : .return)
                     .padding(.horizontal, 10)
                     .padding(.vertical, 8)
                     .background(theme.surfaceVariant, in: RoundedRectangle(cornerRadius: 18))

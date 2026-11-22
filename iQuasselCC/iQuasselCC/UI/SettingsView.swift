@@ -43,7 +43,7 @@ struct SettingsView: View {
                 Toggle("Show nick list button", isOn: $s.showNickListButton)
             }
             Section("Input") {
-                Toggle("Send with return key", isOn: $s.sendOnReturn)
+                Toggle("Keyboard return key sends (off = new line)", isOn: $s.sendOnReturn)
                 Toggle("Always show formatting bar", isOn: $s.showInputFormattingBar)
                 Stepper("History size: \(s.inputHistorySize)", value: $s.inputHistorySize, in: 10...500, step: 10)
             }
