@@ -212,7 +212,10 @@ struct BufferListView: View {
     private func inView(_ b: BufferInfo) -> Bool {
         guard let v = view else { return true }
         if v.networkId != 0 && v.networkId != b.networkId { return false }
-        return v.buffers.contains(b.bufferId)
+        if v.buffers.contains(b.bufferId) { return true }
+        // New chats show up right away, even before the core confirms adding them to the list.
+        return v.addNewBuffersAutomatically && !v.removedBuffers.contains(b.bufferId)
+            && !v.temporarilyRemovedBuffers.contains(b.bufferId)
     }
 
     private var hiddenBuffers: [BufferInfo] {

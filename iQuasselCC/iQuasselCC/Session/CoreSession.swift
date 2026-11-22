@@ -72,7 +72,9 @@ final class CoreSession: Identifiable, CoreConnectionDelegate {
     let ignoreListManager = MapSyncObject(className: "IgnoreListManager")
     let highlightRuleManager = MapSyncObject(className: "HighlightRuleManager")
     let coreInfo = MapSyncObject(className: "CoreInfo")
-    var messageStores: [BufferId: BufferMessages] = [:]
+    /// Not observed: the stores are observable themselves, and creating one while a view renders
+    /// must not invalidate every other view.
+    @ObservationIgnored var messageStores: [BufferId: BufferMessages] = [:]
     var statusMessage: String?
     var passwordChangeResult: Bool?
 
@@ -145,7 +147,33 @@ final class CoreSession: Identifiable, CoreConnectionDelegate {
         }
     }
 
+    @ObservationIgnored private var requestedViewAdds = Set<String>()
+
+    /// Like the official clients: chats that are not in a chat list yet (e.g. a private chat someone
+    /// opened while no client was connected) are added to lists that add new chats automatically,
+    /// and temporarily hidden chats with new messages come back.
+    func syncBuffersIntoViews() {
+        for v in bufferViews.values where v.initialized {
+            for b in buffers.values {
+                if v.networkId != 0 && v.networkId != b.networkId { continue }
+                if !v.allowedBufferTypes.isEmpty && v.allowedBufferTypes.intersection(b.type).isEmpty { continue }
+                if v.buffers.contains(b.bufferId) || v.removedBuffers.contains(b.bufferId) { continue }
+                let key = "\(v.id)/\(b.bufferId)"
+                if requestedViewAdds.contains(key) { continue }
+                if v.temporarilyRemovedBuffers.contains(b.bufferId) {
+                    let act = bufferSyncer.activities[b.bufferId] ?? []
+                    guard !act.intersection(.conversation).isEmpty else { continue }
+                } else if !v.addNewBuffersAutomatically {
+                    continue
+                }
+                requestedViewAdds.insert(key)
+                syncView(v.id, "requestAddBuffer", [.bufferId(b.bufferId), .int(Int32(v.buffers.count))])
+            }
+        }
+    }
+
     private func resetState() {
+        requestedViewAdds = []
         networks = [:]
         buffers = [:]
         identities = [:]
@@ -260,6 +288,7 @@ final class CoreSession: Identifiable, CoreConnectionDelegate {
             networks[id] = n
         case "BufferSyncer":
             bufferSyncer.applyInit(d)
+            syncBuffersIntoViews()
         case "BufferViewManager":
             let ids = (d["BufferViewIds"] ?? d["bufferViewIds"])?.listValue ?? []
             for v in ids {
@@ -273,6 +302,7 @@ final class CoreSession: Identifiable, CoreConnectionDelegate {
             let v = bufferViews[id] ?? BufferViewConfig(id: id)
             v.applyInit(d)
             bufferViews[id] = v
+            syncBuffersIntoViews()
         case "AliasManager": aliasManager.applyInit(d)
         case "IgnoreListManager": ignoreListManager.applyInit(d)
         case "HighlightRuleManager": highlightRuleManager.applyInit(d)
@@ -348,7 +378,10 @@ final class CoreSession: Identifiable, CoreConnectionDelegate {
         case "2displayStatusMsg(QString,QString)":
             statusMessage = p.count > 1 ? "\(p[0].text): \(p[1].text)" : first.text
         case "2bufferInfoUpdated(BufferInfo)":
-            if let b = first.bufferInfoValue { buffers[b.bufferId] = b }
+            if let b = first.bufferInfoValue {
+                buffers[b.bufferId] = b
+                syncBuffersIntoViews()
+            }
         case "2identityCreated(Identity)":
             let i = Identity(map: first.mapValue)
             identities[i.id] = i

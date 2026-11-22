@@ -15,6 +15,12 @@ private enum ChatRow: Identifiable {
     }
 }
 
+/// Non-observed flag holder: changing it never triggers a re-render (avoids layout feedback loops).
+private final class LoaderArm {
+    var armed = false
+    var anchorBeforeLoad: String?
+}
+
 struct ChatView: View {
     @Environment(\.chatTheme) private var theme
     @Environment(\.scenePhase) private var scenePhase
@@ -24,8 +30,7 @@ struct ChatView: View {
     private var settings: AppSettings { AppSettings.shared }
     @State private var atBottom = true
     @State private var scrollToBottomToken = 0
-    /// Auto "load more" only fires after the user really scrolled to the top, once per arrival of the loader.
-    @State private var loaderArmed = false
+    @State private var arm = LoaderArm()
 
     private var store: BufferMessages { session.store(for: buffer.bufferId) }
 
@@ -33,31 +38,54 @@ struct ChatView: View {
         VStack(spacing: 0) {
             ScrollViewReader { proxy in
                 ZStack(alignment: .bottomTrailing) {
-                    ScrollView {
-                        LazyVStack(alignment: .leading, spacing: 0) {
-                            topLoader
-                            ForEach(rows) { row in
-                                rowView(row)
-                                    .id(row.id)
-                            }
-                            Color.clear
-                                .frame(height: 1)
-                                .id("bottom")
-                                .onAppear { atBottom = true }
-                                .onDisappear { atBottom = false }
+                    // List is backed by UICollectionView with cell reuse; it stays smooth with thousands of
+                    // rows and does not suffer from the LazyVStack bottom-anchoring layout loops.
+                    List {
+                        topLoader
+                            .listRowInsets(EdgeInsets())
+                            .listRowSeparator(.hidden)
+                            .listRowBackground(Color.clear)
+                        ForEach(rows) { row in
+                            rowView(row)
+                                .listRowInsets(EdgeInsets())
+                                .listRowSeparator(.hidden)
+                                .listRowBackground(Color.clear)
+                                .id(row.id)
                         }
-                        .padding(.vertical, 4)
+                        Color.clear
+                            .frame(height: 6)
+                            .listRowInsets(EdgeInsets())
+                            .listRowSeparator(.hidden)
+                            .listRowBackground(Color.clear)
+                            .id("bottom")
+                            .onAppear { if !atBottom { atBottom = true } }
+                            .onDisappear { if atBottom { atBottom = false } }
                     }
-                    .defaultScrollAnchor(.bottom)
+                    .listStyle(.plain)
+                    .scrollContentBackground(.hidden)
+                    .environment(\.defaultMinListRowHeight, 1)
                     .scrollDismissesKeyboard(.interactively)
+                    .onAppear {
+                        DispatchQueue.main.async { proxy.scrollTo("bottom", anchor: .bottom) }
+                    }
+                    .onChange(of: store.initialLoaded) { _, loaded in
+                        if loaded { DispatchQueue.main.async { proxy.scrollTo("bottom", anchor: .bottom) } }
+                    }
+                    .onChange(of: store.messages.first?.msgId) { _, _ in
+                        // After loading older history keep the previously first message in place.
+                        if let anchor = arm.anchorBeforeLoad {
+                            arm.anchorBeforeLoad = nil
+                            DispatchQueue.main.async { proxy.scrollTo(anchor, anchor: .top) }
+                        }
+                    }
                     .onChange(of: store.messages.last?.msgId) { _, _ in
                         if atBottom {
-                            withAnimation(.easeOut(duration: 0.15)) { proxy.scrollTo("bottom", anchor: .bottom) }
+                            DispatchQueue.main.async { proxy.scrollTo("bottom", anchor: .bottom) }
                             if scenePhase == .active { session.scheduleMarkRead(buffer.bufferId) }
                         }
                     }
                     .onChange(of: scrollToBottomToken) { _, _ in
-                        withAnimation { proxy.scrollTo("bottom", anchor: .bottom) }
+                        proxy.scrollTo("bottom", anchor: .bottom)
                     }
 
                     if !atBottom {
@@ -72,7 +100,6 @@ struct ChatView: View {
                                 .shadow(radius: 3)
                         }
                         .padding(14)
-                        .transition(.scale.combined(with: .opacity))
                     }
                 }
             }
@@ -86,8 +113,9 @@ struct ChatView: View {
             session.loadInitialBacklog(buffer.bufferId)
             session.markRead(buffer.bufferId)
             Notifier.shared.clear(account: session.id, buffer: buffer.bufferId)
-            loaderArmed = false
-            DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { loaderArmed = true }
+            arm.armed = false
+            let a = arm
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { a.armed = true }
         }
         .onDisappear {
             if session.visibleBuffer == buffer.bufferId { session.visibleBuffer = nil }
@@ -98,6 +126,11 @@ struct ChatView: View {
         .onChange(of: session.isConnected) { _, c in
             if c { session.loadInitialBacklog(buffer.bufferId) }
         }
+    }
+
+    private func loadOlder() {
+        arm.anchorBeforeLoad = store.messages.first.map { "m\($0.msgId)" }
+        session.loadMoreBacklog(buffer.bufferId)
     }
 
     @ViewBuilder private var topLoader: some View {
@@ -117,19 +150,21 @@ struct ChatView: View {
                 .padding(8)
         } else if !store.messages.isEmpty {
             Button {
-                session.loadMoreBacklog(buffer.bufferId)
+                loadOlder()
             } label: {
                 Text("Load older messages")
                     .font(.caption)
                     .frame(maxWidth: .infinity)
                     .padding(8)
             }
+            .buttonStyle(.borderless)
             .onAppear {
-                guard loaderArmed, !atBottom else { return }
-                loaderArmed = false
-                session.loadMoreBacklog(buffer.bufferId)
+                // Only auto-load when the user scrolled up to here (not when the chat is short).
+                guard arm.armed, !atBottom else { return }
+                arm.armed = false
+                loadOlder()
             }
-            .onDisappear { loaderArmed = true }
+            .onDisappear { arm.armed = true }
         }
     }
 
@@ -141,12 +176,14 @@ struct ChatView: View {
         out.reserveCapacity(msgs.count + 8)
         let cal = Calendar.current
         var lastDay: Date?
+        var seenDays = Set<Date>()
         for (i, m) in msgs.enumerated() {
             if !m.type.intersection(hidden).isEmpty && m.type.intersection(.conversation).isEmpty { continue }
             if m.flags.contains(.ignored) { continue }
             let day = cal.startOfDay(for: m.time)
-            if !settings.hideDayChange && lastDay != day {
+            if !settings.hideDayChange && lastDay != day && !seenDays.contains(day) {
                 out.append(.day(day))
+                seenDays.insert(day)
             }
             lastDay = day
             out.append(.message(m))
