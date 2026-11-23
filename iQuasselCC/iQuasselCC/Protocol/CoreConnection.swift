@@ -132,8 +132,17 @@ final class CoreConnection {
         queue.async { self.sendHandshake(["MsgType": .str("CoreSetupData"), "SetupData": .map(data)]) }
     }
 
+    /// Sends a SignalProxy message. Messages are dropped until the session is fully set up:
+    /// Quassel core 0.14 crashes (SIGSEGV in operator>>(QDataStream&, SignedId64&)) when it
+    /// receives a SignalProxy message containing a MsgId before the login has completed.
     func send(_ message: SignalProxyMessage) {
-        queue.async { self.write(self.encode(message)) }
+        queue.async {
+            guard self.handshakeDone, !self.closedByUs, self.transport != nil else {
+                NSLog("iQuasselCC: dropping message sent before the session was ready")
+                return
+            }
+            self.write(self.encode(message))
+        }
     }
 
     func sync(_ className: String, _ objectName: String, _ slot: String, _ params: [QVariant] = []) {
